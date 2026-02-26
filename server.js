@@ -75,8 +75,8 @@ app.get('/oauth2callback', async (req, res) => {
 // 3. ADVISOR ACTION: Send the actual trade
 // ============================================================================
 app.post('/api/send-trade', async (req, res) => {
-    // For this example, let's use the designated client: Sakshi Singh
-    const { clientEmail, tradeDetails } = req.body;
+    // We added advisorIdentifier to track WHO sent it.
+    const { clientEmail, tradeDetails, advisorIdentifier = "System_Test_Advisor" } = req.body;
 
     try {
         // 1. Fetch Client from DB
@@ -108,16 +108,33 @@ app.post('/api/send-trade', async (req, res) => {
         const encodedMessage = Buffer.from(messageParts.join('\n'))
             .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-        // 4. Send Email
+        // 4. Send Email via Google API
         const sentMsg = await gmail.users.messages.send({
             userId: 'me',
             requestBody: { raw: encodedMessage },
         });
 
-        res.json({ success: true, messageId: sentMsg.data.id, broker: brokerEmail });
+        const googleMessageId = sentMsg.data.id;
+
+        // 5. 🛡️ CRITICAL SEBI COMPLIANCE: Write to the Audit Log
+        await db.query(
+            `INSERT INTO audit_logs (advisor_identifier, client_email, broker_email, gmail_message_id, trade_details) 
+             VALUES ($1, $2, $3, $4, $5)`,
+            [advisorIdentifier, clientEmail, brokerEmail, googleMessageId, tradeDetails]
+        );
+
+        // 6. Return Success
+        res.json({ 
+            success: true, 
+            messageId: googleMessageId, 
+            broker: brokerEmail,
+            auditStatus: "Logged Successfully"
+        });
 
     } catch (err) {
-        console.error(err);
+        console.error("Trade Send Error:", err);
+        // Important: If the email fails, we don't log it to the success table.
+        // In a strictly compliant system, you would have a separate 'failed_trades' log here.
         res.status(500).json({ error: 'Failed to send trade.' });
     }
 });
