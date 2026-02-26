@@ -3,6 +3,10 @@ const express = require('express');
 const { google } = require('googleapis');
 const db = require('./db/database');
 const { encryptToken, decryptToken } = require('./utils/encryption');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const authenticateToken = require('./utils/middleware'); // Import the guard
+
 
 const app = express();
 app.use(express.json()); // Allows us to receive JSON payloads
@@ -72,14 +76,73 @@ app.get('/oauth2callback', async (req, res) => {
 });
 
 // ============================================================================
+// ============================================================================
+// ============================================================================
+// TEMPORARY ROUTE: Create a test advisor (Run this once, then you can delete it)
+// ============================================================================
+app.post('/api/create-advisor', async (req, res) => {
+    const { email, password, fullName } = req.body;
+    
+    try {
+        // Scramble the password so it's safe in the database
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        
+        await db.query(
+            `INSERT INTO advisors (email, password_hash, full_name) VALUES ($1, $2, $3)`,
+            [email, hashedPassword, fullName]
+        );
+        res.json({ message: 'Advisor Created Successfully' });
+    } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+    }
+});
+
+// ============================================================================
+// ADVISOR LOGIN: Verifies password and hands out the JWT "ID Badge"
+// ============================================================================
+app.post('/api/login', async (req, res) => {
+    const { email, password } = req.body;
+    
+    try {
+        // 1. Find the advisor in the database
+        const result = await db.query('SELECT * FROM advisors WHERE email = $1', [email]);
+        if (result.rows.length === 0) return res.status(400).json({ error: 'Advisor not found' });
+        
+        const advisor = result.rows[0];
+
+        // 2. Check if the password is correct
+        const validPass = await bcrypt.compare(password, advisor.password_hash);
+        if (!validPass) return res.status(400).json({ error: 'Invalid Password' });
+
+        // 3. Create the JWT Token (The digital ID badge)
+        const token = jwt.sign(
+            { id: advisor.id, email: advisor.email }, // Data stored inside the badge
+            process.env.JWT_SECRET,                   // Locked with your secret key
+            { expiresIn: '8h' }                       // Expires in 8 hours
+        );
+
+        res.json({ message: "Login successful", token: token });
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ============================================================================
 // 3. ADVISOR ACTION: Send the actual trade
 // ============================================================================
-app.post('/api/send-trade', async (req, res) => {
-    // We added advisorIdentifier to track WHO sent it.
-    const { clientEmail, tradeDetails, advisorIdentifier = "System_Test_Advisor" } = req.body;
+// ============================================================================
+// PROTECTED ADVISOR ACTION: Send trade & Log it (Requires JWT Token)
+// ============================================================================
+// Notice 'authenticateToken' is now the middleman intercepting the request
+app.post('/api/send-trade', authenticateToken, async (req, res) => {
+    const { clientEmail, tradeDetails } = req.body;
+    
+    // We get the Advisor's identity strictly from their secure token!
+    const advisorEmail = req.user.email; 
 
     try {
-        // 1. Fetch Client from DB
         const result = await db.query(
             `SELECT broker_email, encrypted_refresh_token FROM clients WHERE client_email = $1 AND is_active = true`,
             [clientEmail]
@@ -91,11 +154,9 @@ app.post('/api/send-trade', async (req, res) => {
         const brokerEmail = client.broker_email;
         const decryptedToken = decryptToken(client.encrypted_refresh_token);
 
-        // 2. Load the token into Google OAuth
         oauth2Client.setCredentials({ refresh_token: decryptedToken });
         const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-        // 3. Construct Email
         const messageParts = [
             `To: ${brokerEmail}`,
             `Subject: Trade Instruction`,
@@ -108,7 +169,6 @@ app.post('/api/send-trade', async (req, res) => {
         const encodedMessage = Buffer.from(messageParts.join('\n'))
             .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-        // 4. Send Email via Google API
         const sentMsg = await gmail.users.messages.send({
             userId: 'me',
             requestBody: { raw: encodedMessage },
@@ -116,14 +176,13 @@ app.post('/api/send-trade', async (req, res) => {
 
         const googleMessageId = sentMsg.data.id;
 
-        // 5. 🛡️ CRITICAL SEBI COMPLIANCE: Write to the Audit Log
+        // Write to the Audit Log using the verified advisorEmail
         await db.query(
             `INSERT INTO audit_logs (advisor_identifier, client_email, broker_email, gmail_message_id, trade_details) 
              VALUES ($1, $2, $3, $4, $5)`,
-            [advisorIdentifier, clientEmail, brokerEmail, googleMessageId, tradeDetails]
+            [advisorEmail, clientEmail, brokerEmail, googleMessageId, tradeDetails]
         );
 
-        // 6. Return Success
         res.json({ 
             success: true, 
             messageId: googleMessageId, 
@@ -133,11 +192,10 @@ app.post('/api/send-trade', async (req, res) => {
 
     } catch (err) {
         console.error("Trade Send Error:", err);
-        // Important: If the email fails, we don't log it to the success table.
-        // In a strictly compliant system, you would have a separate 'failed_trades' log here.
         res.status(500).json({ error: 'Failed to send trade.' });
     }
 });
+
 
 const PORT = 3000;
 app.listen(PORT, () => console.log(`Production API running on port ${PORT}`));
