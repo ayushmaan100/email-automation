@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const { google } = require('googleapis');
 const db = require('./db/database');
 const { encryptToken, decryptToken } = require('./utils/encryption');
@@ -9,6 +10,7 @@ const authenticateToken = require('./utils/middleware'); // Import the guard
 
 
 const app = express();
+app.use(cors());
 app.use(express.json()); // Allows us to receive JSON payloads
 
 const oauth2Client = new google.auth.OAuth2(
@@ -20,7 +22,7 @@ const oauth2Client = new google.auth.OAuth2(
 // ============================================================================
 // 1. ADVISOR ACTION: Generate a unique authorization link for a new Client
 // ============================================================================
-app.post('/api/generate-auth-link', async (req, res) => {
+app.post('/api/generate-auth-link', authenticateToken, async (req, res) => {
     const { clientName, clientEmail, brokerEmail } = req.body;
 
     // Save the client to the DB initially without a token

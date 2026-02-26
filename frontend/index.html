@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advisor Trade Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans h-screen flex flex-col items-center p-10">
+
+    <div id="login-section" class="w-full max-w-md bg-white rounded-lg shadow-md p-8 mt-20">
+        <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">Advisor Login</h2>
+        <form id="login-form" class="space-y-4">
+            <div>
+                <label class="block text-gray-700 text-sm font-bold mb-2">Email</label>
+                <input type="email" id="login-email" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-gray-700 text-sm font-bold mb-2">Password</label>
+                <input type="password" id="login-password" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <button type="submit" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200">Log In</button>
+        </form>
+        <p id="login-error" class="text-red-500 text-sm mt-4 hidden"></p>
+    </div>
+
+    <div class="bg-white rounded-lg shadow-md p-6 mb-6 border-l-4 border-blue-500">
+            <h3 class="text-xl font-semibold mb-4 text-gray-700">Onboard New Client</h3>
+            <form id="onboard-form" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">Client Name</label>
+                        <input type="text" id="onboard-name" placeholder="e.g., John Doe" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">Client Email</label>
+                        <input type="email" id="onboard-email" placeholder="client@gmail.com" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-gray-700 text-sm font-bold mb-2">Broker Email</label>
+                        <input type="email" id="onboard-broker" placeholder="broker@firm.com" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                <button type="submit" id="generate-link-btn" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200">Generate Authorization Link</button>
+            </form>
+            
+            <div id="link-result-container" class="mt-4 hidden p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <p class="text-sm font-bold text-gray-700 mb-2">Send this link to the client securely:</p>
+                <div class="flex items-center space-x-2">
+                    <input type="text" id="generated-link" readonly class="w-full px-3 py-2 border rounded-lg bg-white text-xs text-gray-600 outline-none">
+                    <button onclick="copyLink()" class="bg-gray-800 text-white px-4 py-2 rounded-lg hover:bg-gray-900 text-sm font-bold transition duration-200">Copy</button>
+                </div>
+            </div>
+        </div>
+
+    <div id="dashboard-section" class="w-full max-w-2xl hidden">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">Trade Dispatch Console</h1>
+            <button onclick="logout()" class="text-sm bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600">Logout</button>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6 border-l-4 border-green-500">
+            <h3 class="text-xl font-semibold mb-4 text-gray-700">Execute Trade</h3>
+            <form id="trade-form" class="space-y-4">
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Client Email</label>
+                    <input type="email" id="trade-client-email" placeholder="e.g., client@gmail.com" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
+                </div>
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Trade Details</label>
+                    <textarea id="trade-details" rows="3" placeholder="Buy 100 shares of Reliance @ Market" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"></textarea>
+                </div>
+                <button type="submit" id="send-trade-btn" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition duration-200">Send to Broker</button>
+            </form>
+            <p id="trade-status" class="text-sm mt-4 font-bold hidden"></p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3000/api';
+
+        // Elements
+        const loginSection = document.getElementById('login-section');
+        const dashboardSection = document.getElementById('dashboard-section');
+        const loginForm = document.getElementById('login-form');
+        const tradeForm = document.getElementById('trade-form');
+        const loginError = document.getElementById('login-error');
+        const tradeStatus = document.getElementById('trade-status');
+        const sendTradeBtn = document.getElementById('send-trade-btn');
+        const onboardForm = document.getElementById('onboard-form');
+        const generateLinkBtn = document.getElementById('generate-link-btn');
+        const linkResultContainer = document.getElementById('link-result-container');
+        const generatedLinkInput = document.getElementById('generated-link');
+
+        // Check if already logged in on page load
+        if (localStorage.getItem('advisorToken')) {
+            showDashboard();
+        }
+
+        // --- LOGIN LOGIC ---
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Save JWT token securely in localStorage
+                    localStorage.setItem('advisorToken', data.token);
+                    loginError.classList.add('hidden');
+                    showDashboard();
+                } else {
+                    loginError.textContent = data.error;
+                    loginError.classList.remove('hidden');
+                }
+            } catch (err) {
+                loginError.textContent = "Server connection failed.";
+                loginError.classList.remove('hidden');
+            }
+        });
+
+        // --- SEND TRADE LOGIC ---
+        tradeForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const clientEmail = document.getElementById('trade-client-email').value;
+            const tradeDetails = document.getElementById('trade-details').value;
+            const token = localStorage.getItem('advisorToken');
+
+            // UI Feedback
+            sendTradeBtn.textContent = 'Sending...';
+            sendTradeBtn.disabled = true;
+            tradeStatus.classList.add('hidden');
+
+            try {
+                const response = await fetch(`${API_BASE}/send-trade`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}` // Injecting the JWT Token!
+                    },
+                    body: JSON.stringify({ clientEmail, tradeDetails })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    tradeStatus.textContent = `✅ Success! Msg ID: ${data.messageId}`;
+                    tradeStatus.className = "text-green-600 text-sm mt-4 font-bold";
+                    tradeForm.reset(); // Clear the form
+                } else {
+                    // If token expired, force logout
+                    if (response.status === 401 || response.status === 403) logout();
+                    
+                    tradeStatus.textContent = `❌ Error: ${data.error}`;
+                    tradeStatus.className = "text-red-600 text-sm mt-4 font-bold";
+                }
+            } catch (err) {
+                tradeStatus.textContent = "❌ Server connection failed.";
+                tradeStatus.className = "text-red-600 text-sm mt-4 font-bold";
+            } finally {
+                tradeStatus.classList.remove('hidden');
+                sendTradeBtn.textContent = 'Send to Broker';
+                sendTradeBtn.disabled = false;
+            }
+        });
+
+        // --- ONBOARD CLIENT LOGIC ---
+        // const onboardForm = document.getElementById('onboard-form');
+        // const generateLinkBtn = document.getElementById('generate-link-btn');
+        // const linkResultContainer = document.getElementById('link-result-container');
+        // const generatedLinkInput = document.getElementById('generated-link');
+
+        onboardForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const clientName = document.getElementById('onboard-name').value;
+            const clientEmail = document.getElementById('onboard-email').value;
+            const brokerEmail = document.getElementById('onboard-broker').value;
+            const token = localStorage.getItem('advisorToken');
+
+            // UI Feedback
+            generateLinkBtn.textContent = 'Generating...';
+            generateLinkBtn.disabled = true;
+            linkResultContainer.classList.add('hidden');
+
+            try {
+                const response = await fetch(`${API_BASE}/generate-auth-link`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}` 
+                    },
+                    body: JSON.stringify({ clientName, clientEmail, brokerEmail })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    generatedLinkInput.value = data.authUrl;
+                    linkResultContainer.classList.remove('hidden');
+                    onboardForm.reset(); // Clear the inputs
+                } else {
+                    if (response.status === 401 || response.status === 403) logout();
+                    alert(`❌ Error: ${data.error}`);
+                }
+            } catch (err) {
+                alert("❌ Server connection failed.");
+            } finally {
+                generateLinkBtn.textContent = 'Generate Authorization Link';
+                generateLinkBtn.disabled = false;
+            }
+        });
+
+        // Copy to clipboard helper
+        function copyLink() {
+            generatedLinkInput.select();
+            document.execCommand('copy');
+            alert('✅ Link copied to clipboard!');
+        }
+
+        // --- NAVIGATION HELPERS ---
+        function showDashboard() {
+            loginSection.classList.add('hidden');
+            dashboardSection.classList.remove('hidden');
+        }
+
+        function logout() {
+            localStorage.removeItem('advisorToken');
+            dashboardSection.classList.add('hidden');
+            loginSection.classList.remove('hidden');
+            loginForm.reset();
+        }
+
+        // Copy to clipboard helper
+        function copyLink() {
+            generatedLinkInput.select();
+            document.execCommand('copy');
+            alert('✅ Link copied to clipboard!');
+        }
+        
+    </script>
+</body>
+</html>
